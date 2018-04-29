@@ -1,2 +1,2 @@
 # StatelyTrader
-Stock trading AI, run on your own pc for free.
+Bittrex trading wallet AI, run on your own device for free!
