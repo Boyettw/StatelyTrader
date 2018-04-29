@@ -40,35 +40,51 @@ def generate_feature(db, collections, input_epoch, minibatch_size):
         market_count = market_count + 1
     return history
 
+def find_test_max():
+    max_epoch = sys.float_info.max
+    for market in collections:
+        for trade in db[market].find().sort([('epoch', pymongo.DESCENDING)]).limit(2):
+            if max_epoch > trade['epoch']:
+                max_epoch = trade['epoch']
+    return max_epoch
 
-def find_dev_min(db, collections):
+def find_test_min(db, collections):
     min_epoch = sys.float_info.min
     for market in collections:
-        for trade in db[market].find().sort([('epoch', pymongo.ASCENDING)]).limit(101):
+        for trade in db[market].find().sort([('epoch', pymongo.DESCENDING)]).limit(404): #magic 100 + 1 label 4 times
             if trade['epoch'] > min_epoch:
                 min_epoch = trade['epoch']
     return min_epoch
 
-def find_dev_max():
 
-
-def find_max(db, collections, prediction_length):
+def find_train_max(db, collections, test_min):
     max_epoch = sys.float_info.max
     for market in collections:
-        for trade in db[market].find().sort([('epoch', pymongo.DESCENDING)]).limit(1):
+        for trade in db[market].find({'epoch': {'$lte': test_min}}).sort([('epoch', pymongo.DESCENDING)]).limit(2):
             if max_epoch > trade['epoch']:
                 max_epoch = trade['epoch']
-    return max_epoch - 10000 - prediction_length
+    return max_epoch
 
-def find_test_min(db, collections, dev_max):
-    min_epoch = sys.float_info.min
+def find_train_min(db, collections):
+    min_epoch = sys.float_info.min # 101 off each market, latest epoch available
+
+
+
+def find_train_max(db, collections, test_max):
+
 
 def generate_features(db, collections):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
+    train_max = find_train_max(db, collections)
+    test_min = find_test_min(db, collections)
+    test_max = find_test_max(db, collections)
+    train_min = find_train_min
+
+
     return_dict = {}
-    return_dict['train_max'] = find_max(db, collections)
-    return_dict['dev_min'] = find_dev_min(db, collections)
-    return_dict['dev_max'] = find_dev_max(db, collections)
-    return_dict['train_min'] =fin
+    return_dict['train_features'] =                     #find_max(db, collections)
+    return_dict['train_labels'] =                            #find_dev_min(db, collections)
+    return_dict['dev_features'] =                            #find_dev_max(db, collections)
+    return_dict['dev_labels'] =                          #fin
 
 
 
@@ -138,3 +154,15 @@ collections = db.collection_names()
 collections.sort()
 train(db, collections, train_features = np.random.ranf((1000, 400, 190)), train_labels = np.random.randint(low=0, high=190, size=(1000)))
 client.close()
+
+"""
+train rnn on input = (minibatch_size x 400 x 190)(save to disk after for rententional training?), 
+feed flattened? input + output + weights into convolutional with larger fields,
+take output classification on all data where rnn was true/positives excluding false positives,
+calling this approach grafting, like a skin graft of information to rebuild ability to follow rnn weights(less than 5% of train data),
+train on real results for 60%,
+for the next 10% predict in section called dev,
+then algorithmically determine best fit by listening to all three magnitudes of time,
+buying on 30 seconds but selling on 6 minutes to start(compare how often they argue and look at the real results yourself to determine who is more accurate.),
+need to set number of classes to 191 (one extra for when leaving coin in btc is optimal,
+"""
