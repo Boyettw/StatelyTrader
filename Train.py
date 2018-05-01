@@ -69,7 +69,7 @@ def find_test_min(db, collections):
 def find_train_max(db, collections, test_min, ms_into_the_future): #generate feature hands you
     max_epoch = sys.float_info.max
     for market in collections:
-        for trade in db[market].find({'epoch': {'$lte': test_min - 400000}}).sort([('epoch', pymongo.ASCENDING)]).limit(2):
+        for trade in db[market].find({'epoch': {'$lte': test_min - 40000}}).sort([('epoch', pymongo.DESCENDING)]).limit(2):
             if max_epoch > trade['epoch']:
                 max_epoch = trade['epoch']
     return max_epoch    #returns the min - extra trades -
@@ -77,7 +77,7 @@ def find_train_max(db, collections, test_min, ms_into_the_future): #generate fea
 def find_train_min(db, collections):
     min_epoch = sys.float_info.min # 101 off each market, latest epoch available
     for market in collections:
-        for trade in db[market].find().sort([('epoch', pymongo.ASCENDING)]).limit(101):  # magic 100 + 1 label, 4 times
+        for trade in db[market].find().sort([('epoch', pymongo.ASCENDING)]).limit(101):  # magic 100 + 1 label
             if trade['epoch'] > min_epoch:
                 min_epoch = trade['epoch']
     return min_epoch
