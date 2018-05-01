@@ -80,7 +80,6 @@ def find_train_min(db, collections):
                 min_epoch = trade['epoch']
     return min_epoch
 
-
 def generate_data(db, collections, batch_size, trade_length, history_length, markets_length, ttl_length):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
     test_min = find_test_min(db, collections)
     train_max = find_train_max(db, collections, test_min, ms_into_the_future=6000)
@@ -117,10 +116,10 @@ def train(db, collections):
     ttl_length = history_length * trade_length
     batch_size = 10000
     minibatch_size = 100
-    epochs = 10000
+    epochs = 100
     learn_rate = .0003
     num_hidden_units = 200
-    num_steps = 100
+    num_steps = history_length * trade_length
     num_inputs = 190
     num_classes = 191
 
@@ -152,7 +151,11 @@ def train(db, collections):
     init = tf.global_variables_initializer()
 
     sess.run(init)
-    for batch in range(1000):
+    for batch in range(100000):
+        train_features = 0
+        train_labels = 0
+        test_features = 0
+        test_labels = 0
         data_dict = generate_data(db, collections, batch_size, trade_length, history_length, markets_length, ttl_length)
         train_features = data_dict['train_features']
         train_labels = data_dict['train_labels']
