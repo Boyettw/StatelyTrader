@@ -9,21 +9,22 @@ from random import randint
 
 def generate_label(db, collections, input_epoch):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
     markets_length = 190
-    label_offset = 6000
+    label_offset = 60000
     market_index = 0
     sell_encoding = -1
     max_gain = 0
     future_trade_price = 0
+    future_epoch = input_epoch + label_offset
     label = 190 #if label_index returns == 190 than all markets failed to gain more than 0.25% compared to btc. Make 0.25 a hyper parameter, perhaps a range of one_hot_encoded slices?
     for market_name in collections:
-        for label_document in db[market_name].find({'epoch': {'$gte': (input_epoch + label_offset)}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
+        for label_document in db[market_name].find({'epoch': {'$gte': (future_epoch)}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
             future_trade_price = label_document['rate']
         for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
             trade_gain = future_trade_price - trade['rate']
-            if (trade_gain > 0.025 * trade['rate']) and (trade_gain > max_gain):
+            if (trade_gain > 0.025 * trade['rate']) and (trade_gain > max_gain) and (trade['epoch'] + 30000 < future_trade_price):
                 max_gain = trade_gain
                 label = market_index
-    market_index += 1
+        market_index += 1
     return label
 
 
@@ -50,10 +51,10 @@ def generate_feature(input_epoch, db, collections, trade_length, history_length,
     return history
 
 def find_test_max(db, collections):
-    max_epoch = sys.float_info.max
+    max_epoch = sys.float_info.min
     for market in collections:
         for trade in db[market].find().sort([('epoch', pymongo.DESCENDING)]).limit(2):
-            if max_epoch > trade['epoch']:
+            if max_epoch < trade['epoch']:
                 max_epoch = trade['epoch']
     return max_epoch
 
@@ -65,10 +66,10 @@ def find_test_min(db, collections):
                 min_epoch = trade['epoch']
     return min_epoch
 
-def find_train_max(db, collections, test_offset, ms_into_the_future): #generate feature hands you
+def find_train_max(db, collections, test_min, ms_into_the_future): #generate feature hands you
     max_epoch = sys.float_info.max
     for market in collections:
-        for trade in db[market].find({'epoch': {'$lte': test_offset - ms_into_the_future}}).sort([('epoch', pymongo.DESCENDING)]).limit(2):
+        for trade in db[market].find({'epoch': {'$lte': test_min - 400000}}).sort([('epoch', pymongo.ASCENDING)]).limit(2):
             if max_epoch > trade['epoch']:
                 max_epoch = trade['epoch']
     return max_epoch    #returns the min - extra trades -
@@ -95,13 +96,13 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
     return_dict['train_labels'] = numpy.zeros((batch_size))
     return_dict['test_labels'] = numpy.zeros((test_batch_size))
     for i in range(0, batch_size):
-        train_epoch = np.random.randint(low=train_min, high=train_max)
+        train_epoch = np.random.uniform(low=train_min, high=train_max + 1)
         return_dict['train_features'][i] = generate_feature(train_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
         return_dict['train_labels'][i] = generate_label(db, collections, train_epoch)
         print("generated batch index: %d" % i)
 
     for i in range(0, test_batch_size):
-        test_epoch = np.random.randint(low=test_min, high=test_max)
+        test_epoch = np.random.uniform(low=test_min, high=test_max + 1)
         return_dict['test_features'][i] = generate_feature(test_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
         return_dict['test_labels'][i] = generate_label(db, collections, test_epoch)
         print("generated test_batch index: %d" % i)
@@ -112,10 +113,10 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
 
 def train(db, collections, train_features, train_labels, dev_features, dev_labels):
     num_classes = 191
-    minibatch_size = 1
+    minibatch_size = 10
     epochs = 10000
     learnrate = .0003
-    num_hidden_units = 200
+    num_hidden_units = 2000
     num_steps = train_features.shape[1]
     num_inputs = train_features.shape[2]
 
