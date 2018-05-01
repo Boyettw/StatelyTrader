@@ -8,20 +8,18 @@ import numpy as np
 from random import randint
 
 def generate_label(db, collections, input_epoch):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
-    markets_length = 190
     label_offset = 60000
     market_index = 0
-    sell_encoding = -1
     max_gain = 0
     future_trade_price = 0
     future_epoch = input_epoch + label_offset
-    label = 190 #if label_index returns == 190 than all markets failed to gain more than 0.25% compared to btc. Make 0.25 a hyper parameter, perhaps a range of one_hot_encoded slices?
+    label = 190
     for market_name in collections:
-        for label_document in db[market_name].find({'epoch': {'$gte': (future_epoch)}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
+        for label_document in db[market_name].find({'epoch': {'$lte': future_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             future_trade_price = label_document['rate']
-        for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
+        for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             trade_gain = future_trade_price - trade['rate']
-            if (trade_gain > 0.025 * trade['rate']) and (trade_gain > max_gain) and (trade['epoch'] + 30000 < future_trade_price):
+            if (trade_gain >= max_gain) and ((trade['epoch'] + 3000) < future_epoch):
                 max_gain = trade_gain
                 label = market_index
         market_index += 1
@@ -75,10 +73,10 @@ def find_train_max(db, collections, test_min, ms_into_the_future): #generate fea
     return max_epoch    #returns the min - extra trades -
 
 def find_train_min(db, collections):
-    min_epoch = sys.float_info.min # 101 off each market, latest epoch available
+    min_epoch = sys.float_info.max # 101 off each market, latest epoch available
     for market in collections:
         for trade in db[market].find().sort([('epoch', pymongo.ASCENDING)]).limit(101):  # magic 100 + 1 label
-            if trade['epoch'] > min_epoch:
+            if trade['epoch'] < min_epoch:
                 min_epoch = trade['epoch']
     return min_epoch
 
@@ -88,7 +86,7 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
     train_max = find_train_max(db, collections, test_min, ms_into_the_future=6000)
     test_max = find_test_max(db, collections)
     train_min = find_train_min(db, collections)
-    test_batch_size = 1
+    test_batch_size = 100
 
     return_dict = {}
     return_dict['train_features'] = numpy.zeros((batch_size, ttl_length, markets_length))
@@ -111,14 +109,20 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
     return return_dict
 
 
-def train(db, collections, train_features, train_labels, dev_features, dev_labels):
-    num_classes = 191
-    minibatch_size = 10
+def train(db, collections):
+
+    trade_length = 4
+    history_length = 100
+    markets_length = 190
+    ttl_length = history_length * trade_length
+    batch_size = 10000
+    minibatch_size = 100
     epochs = 10000
-    learnrate = .0003
-    num_hidden_units = 2000
-    num_steps = train_features.shape[1]
-    num_inputs = train_features.shape[2]
+    learn_rate = .0003
+    num_hidden_units = 200
+    num_steps = 100
+    num_inputs = 190
+    num_classes = 191
 
     x_type = tf.float32
     y_type = tf.int64
@@ -136,7 +140,7 @@ def train(db, collections, train_features, train_labels, dev_features, dev_label
     logit = tf.matmul(outputs[-1], weights) + biases
 
     loss_calc = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits=logit, labels=y))
-    optimizer = tf.train.AdamOptimizer(learning_rate=learnrate).minimize(loss_calc)
+    optimizer = tf.train.AdamOptimizer(learning_rate=learn_rate).minimize(loss_calc)
 
     sess = tf.Session()
     with tf.name_scope('accuracy'):
@@ -148,14 +152,19 @@ def train(db, collections, train_features, train_labels, dev_features, dev_label
     init = tf.global_variables_initializer()
 
     sess.run(init)
-
-    for i in range(epochs):
-        for j in range(int(train_features.shape[0] / minibatch_size)):
-            minibatch_features = train_features[j * minibatch_size:(j + 1) * minibatch_size]
-            minibatch_labels = train_labels[j * minibatch_size:(j + 1) * minibatch_size]
-            _, loss, acc = sess.run([optimizer, loss_calc, accuracy], feed_dict={x: minibatch_features, y: minibatch_labels})
-        test_loss, test_acc = sess.run([loss_calc, accuracy], feed_dict={x: dev_features, y: dev_labels})
-        print("Epoch %03d: train=%.3f test=%.3f" % (i, acc, test_acc))
+    for batch in range(1000):
+        data_dict = generate_data(db, collections, batch_size, trade_length, history_length, markets_length, ttl_length)
+        train_features = data_dict['train_features']
+        train_labels = data_dict['train_labels']
+        test_features = data_dict['test_features']
+        test_labels = data_dict['test_labels']
+        for i in range(epochs):
+            for j in range(int(train_features.shape[0] / minibatch_size)):
+                minibatch_features = train_features[j * minibatch_size:(j + 1) * minibatch_size]
+                minibatch_labels = train_labels[j * minibatch_size:(j + 1) * minibatch_size]
+                _, loss, acc = sess.run([optimizer, loss_calc, accuracy], feed_dict={x: minibatch_features, y: minibatch_labels})
+            test_loss, test_acc = sess.run([loss_calc, accuracy], feed_dict={x: test_features, y: test_labels})
+            print("Epoch %03d: train=%.3f test=%.3f" % (i, acc, test_acc))
 
 
 
@@ -163,16 +172,9 @@ client = MongoClient('10.0.0.88', 27017)
 db = client['markets']
 collections = db.collection_names()
 collections.sort()
-batch_size = 10
-trade_length = 4
-history_length = 100
-markets_length = 190
-ttl_length = history_length * trade_length
-print("Generating data!")
-data_dict = generate_data(db, collections, batch_size, trade_length, history_length, markets_length, ttl_length)
-#should print out data to disk here.
-print("Training on data")
-train(db, collections, data_dict['train_features'], data_dict['train_labels'], data_dict['test_features'], data_dict['test_labels'])
+
+
+train(db, collections)
 #test_and_save()
 client.close()
 
