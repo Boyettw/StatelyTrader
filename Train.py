@@ -86,7 +86,7 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
     train_max = find_train_max(db, collections, test_min, ms_into_the_future=6000)
     test_max = find_test_max(db, collections)
     train_min = find_train_min(db, collections)
-    test_batch_size = 10
+    test_batch_size = 1 # 10
 
     return_dict = {}
     return_dict['train_features'] = numpy.zeros((batch_size, ttl_length, markets_length))
@@ -101,7 +101,7 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
 
     for i in range(0, test_batch_size):
         test_epoch = np.random.randint(low=test_min, high=test_max)
-        return_dict['test_features'][i] = generate_feature(test_epoch, db, collections, batch_size,  trade_length, history_length, markets_length, ttl_length)
+        return_dict['test_features'][i] = generate_feature(test_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
         return_dict['test_labels'][i] = generate_label(db, collections, test_epoch)
         print("generated test_batch index: %d" % i)
     return return_dict
@@ -109,7 +109,7 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
 
 def train(db, collections, train_features, train_labels, dev_features, dev_labels):
     num_classes = 191
-    minibatch_size = 100
+    minibatch_size = 10
     epochs = 1000
     learnrate = .0003
     num_hidden_units = 100
