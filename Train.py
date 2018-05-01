@@ -9,7 +9,7 @@ from random import randint
 
 def generate_label(db, collections, input_epoch):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
     markets_length = 190
-    label_offset = 6 * 1000 * 60
+    label_offset = 6000
     market_index = 0
     sell_encoding = -1
     max_gain = 0
@@ -20,9 +20,10 @@ def generate_label(db, collections, input_epoch):   #TODO reformat to return the
             future_trade_price = label_document['Rate']
         for trade in db[market_name].find({'$and': [{'epoch': {'$lte': input_epoch}}, {'orderType': {'eq': sell_encoding}}]}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
             trade_gain = future_trade_price - trade['Rate']
-            if (trade_gain > 1.025 * trade['Rate']) and (trade_gain > max_gain):
+            if (trade_gain > 0.025 * trade['Rate']) and (trade_gain > max_gain):
                 max_gain = trade_gain
                 label = market_index
+    market_index += 1
     return label
 
 
@@ -86,7 +87,7 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
     train_max = find_train_max(db, collections, test_min, ms_into_the_future=6000)
     test_max = find_test_max(db, collections)
     train_min = find_train_min(db, collections)
-    test_batch_size = 1 # 10
+    test_batch_size = 1
 
     return_dict = {}
     return_dict['train_features'] = numpy.zeros((batch_size, ttl_length, markets_length))
@@ -104,15 +105,17 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
         return_dict['test_features'][i] = generate_feature(test_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
         return_dict['test_labels'][i] = generate_label(db, collections, test_epoch)
         print("generated test_batch index: %d" % i)
+    print(return_dict['train_labels'])
+    print(return_dict['test_labels'])
     return return_dict
 
 
 def train(db, collections, train_features, train_labels, dev_features, dev_labels):
     num_classes = 191
-    minibatch_size = 10
-    epochs = 1000
+    minibatch_size = 1
+    epochs = 10000
     learnrate = .0003
-    num_hidden_units = 100
+    num_hidden_units = 200
     num_steps = train_features.shape[1]
     num_inputs = train_features.shape[2]
 
