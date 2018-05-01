@@ -16,11 +16,11 @@ def generate_label(db, collections, input_epoch):   #TODO reformat to return the
     future_trade_price = 0
     label = 190 #if label_index returns == 190 than all markets failed to gain more than 0.25% compared to btc. Make 0.25 a hyper parameter, perhaps a range of one_hot_encoded slices?
     for market_name in collections:
-        for label_document in db[market_name].find({'$and': [{'epoch': {'$gte': (input_epoch + label_offset)}}, {'orderType': {'eq': sell_encoding}}]}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
-            future_trade_price = label_document['Rate']
-        for trade in db[market_name].find({'$and': [{'epoch': {'$lte': input_epoch}}, {'orderType': {'eq': sell_encoding}}]}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
-            trade_gain = future_trade_price - trade['Rate']
-            if (trade_gain > 0.025 * trade['Rate']) and (trade_gain > max_gain):
+        for label_document in db[market_name].find({'epoch': {'$gte': (input_epoch + label_offset)}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
+            future_trade_price = label_document['rate']
+        for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
+            trade_gain = future_trade_price - trade['rate']
+            if (trade_gain > 0.025 * trade['rate']) and (trade_gain > max_gain):
                 max_gain = trade_gain
                 label = market_index
     market_index += 1
