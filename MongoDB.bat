@@ -1,0 +1,1 @@
+"C:\Program Files\MongoDB\Server\3.6\bin\mongod" --dbpath "E:\data" --bind_ip 10.0.0.88
