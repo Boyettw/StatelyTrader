@@ -5,6 +5,7 @@ import sys
 import tensorflow as tf
 from tensorflow.contrib import rnn
 import numpy as np
+from multiprocessing import Process, Queue
 from random import randint
 
 def generate_label(db, collections, input_epoch):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
@@ -80,7 +81,13 @@ def find_train_min(db, collections):
                 min_epoch = trade['epoch']
     return min_epoch
 
-def generate_data(db, collections, batch_size, trade_length, history_length, markets_length, ttl_length):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
+def generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, queue, process_num):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
+    client = MongoClient('10.0.0.88', 27017)
+    db = client['markets']
+    collections = db.collection_names()
+    collections.sort()
+
+
     test_min = find_test_min(db, collections)
     train_max = find_train_max(db, collections, test_min, ms_into_the_future=6000)
     test_max = find_test_max(db, collections)
@@ -88,6 +95,7 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
     test_batch_size = 100
 
     return_dict = {}
+    return_dict['process_num'] = process_num
     return_dict['train_features'] = numpy.zeros((batch_size, ttl_length, markets_length))
     return_dict['test_features'] = numpy.zeros((test_batch_size, ttl_length, markets_length))
     return_dict['train_labels'] = numpy.zeros((batch_size))
@@ -105,20 +113,21 @@ def generate_data(db, collections, batch_size, trade_length, history_length, mar
         print("generated test_batch index: %d" % i)
     print(return_dict['train_labels'])
     print(return_dict['test_labels'])
-    return return_dict
+    client.close()
+    queue.put(return_dict)
 
 
-def train(db, collections):
+def train():
 
     trade_length = 4
     history_length = 100
     markets_length = 190
     ttl_length = history_length * trade_length
-    batch_size = 10000
+    batch_size = 1000
     minibatch_size = 100
-    epochs = 100
-    learn_rate = .0003
-    num_hidden_units = 200
+    epochs = 3
+    learn_rate = .003
+    num_hidden_units = 400
     num_steps = history_length * trade_length
     num_inputs = 190
     num_classes = 191
@@ -150,13 +159,24 @@ def train(db, collections):
     tf.summary.scalar('accuracy', accuracy)
     init = tf.global_variables_initializer()
 
+    last_process = 0
+    output = Queue()
+    processes = []
+    for i in range(3):
+        processes.append(Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length, ttl_length, output, i)))
+        processes[i].start()
+
     sess.run(init)
     for batch in range(100000):
         train_features = 0
         train_labels = 0
         test_features = 0
         test_labels = 0
-        data_dict = generate_data(db, collections, batch_size, trade_length, history_length, markets_length, ttl_length)
+        processes[((last_process + 1) % 3)].join()
+        data_dict = output.get()
+        processes[data_dict['process_num']] = Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length, ttl_length))
+        processes[data_dict['process_num']].start()
+        last_process = data_dict['process_num']
         train_features = data_dict['train_features']
         train_labels = data_dict['train_labels']
         test_features = data_dict['test_features']
@@ -170,16 +190,7 @@ def train(db, collections):
             print("Epoch %03d: train=%.3f test=%.3f" % (i, acc, test_acc))
 
 
-
-client = MongoClient('10.0.0.88', 27017)
-db = client['markets']
-collections = db.collection_names()
-collections.sort()
-
-
-train(db, collections)
-#test_and_save()
-client.close()
+train()
 
 """
 train rnn on input = (minibatch_size x 400 x 190)(save to disk after for retentional training?), 
