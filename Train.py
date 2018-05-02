@@ -123,8 +123,8 @@ def train():
     history_length = 100
     markets_length = 190
     ttl_length = history_length * trade_length
-    batch_size = 5000
-    minibatch_size = 100
+    batch_size = 2000
+    minibatch_size = 50
     epochs = 25
     learn_rate = .003
     num_hidden_units = 800
@@ -162,7 +162,8 @@ def train():
     last_process = 0
     queues = []
     processes = []
-    for i in range(3):
+    num_processes = 7
+    for i in range(num_processes):
         queues.append(Queue())
         processes.append(Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length, ttl_length, queues[i])))
         processes[i].start()
@@ -174,7 +175,7 @@ def train():
         test_features = 0
         test_labels = 0
 
-        last_process = ((last_process + 1) % 3)
+        last_process = ((last_process + 1) % num_processes)
         data_dict = queues[last_process].get()
         processes[last_process].join()
         processes[last_process] = Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length,ttl_length, queues[last_process]))
