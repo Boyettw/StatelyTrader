@@ -81,7 +81,7 @@ def find_train_min(db, collections):
                 min_epoch = trade['epoch']
     return min_epoch
 
-def generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, queue, process_num):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
+def generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, queue):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
     client = MongoClient('10.0.0.88', 27017)
     db = client['markets']
     collections = db.collection_names()
@@ -95,7 +95,6 @@ def generate_data(batch_size, trade_length, history_length, markets_length, ttl_
     test_batch_size = 100
 
     return_dict = {}
-    return_dict['process_num'] = process_num
     return_dict['train_features'] = numpy.zeros((batch_size, ttl_length, markets_length))
     return_dict['test_features'] = numpy.zeros((test_batch_size, ttl_length, markets_length))
     return_dict['train_labels'] = numpy.zeros((batch_size))
@@ -115,6 +114,7 @@ def generate_data(batch_size, trade_length, history_length, markets_length, ttl_
     print(return_dict['test_labels'])
     client.close()
     queue.put(return_dict)
+    return
 
 
 def train():
@@ -123,11 +123,11 @@ def train():
     history_length = 100
     markets_length = 190
     ttl_length = history_length * trade_length
-    batch_size = 1000
+    batch_size = 5000
     minibatch_size = 100
-    epochs = 3
+    epochs = 25
     learn_rate = .003
-    num_hidden_units = 400
+    num_hidden_units = 800
     num_steps = history_length * trade_length
     num_inputs = 190
     num_classes = 191
@@ -160,10 +160,11 @@ def train():
     init = tf.global_variables_initializer()
 
     last_process = 0
-    output = Queue()
+    queues = []
     processes = []
     for i in range(3):
-        processes.append(Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length, ttl_length, output, i)))
+        queues.append(Queue())
+        processes.append(Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length, ttl_length, queues[i])))
         processes[i].start()
 
     sess.run(init)
@@ -172,11 +173,13 @@ def train():
         train_labels = 0
         test_features = 0
         test_labels = 0
-        processes[((last_process + 1) % 3)].join()
-        data_dict = output.get()
-        processes[data_dict['process_num']] = Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length, ttl_length))
-        processes[data_dict['process_num']].start()
-        last_process = data_dict['process_num']
+
+        last_process = ((last_process + 1) % 3)
+        data_dict = queues[last_process].get()
+        processes[last_process].join()
+        processes[last_process] = Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length,ttl_length, queues[last_process]))
+        processes[last_process].start()
+
         train_features = data_dict['train_features']
         train_labels = data_dict['train_labels']
         test_features = data_dict['test_features']
