@@ -8,13 +8,12 @@ import numpy as np
 from multiprocessing import Process, Queue
 from random import randint
 
-def generate_label(db, collections, input_epoch, num_labels, label_offset):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
-
+def generate_label(db, collections, input_epoch, label_offset, num_classes):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
     market_index = 0
     max_gain = 0
     future_trade_price = 0
     future_epoch = input_epoch + label_offset
-    max_market = num_labels
+    max_market = num_classes
     for market_name in collections:
         for label_document in db[market_name].find({'epoch': {'$lte': future_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             future_trade_price = label_document['rate']
@@ -81,34 +80,41 @@ def find_train_min(db, collections, history_length):
                 min_epoch = trade['epoch']
     return min_epoch
 
-def generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
+def find_ranges(history_length):
     client = MongoClient('127.0.0.1', 27017)
     db = client['markets']
     collections = db.collection_names()
     collections.sort()
+    return_dict = {}
+    return_dict['test_min'] = find_test_min(db, collections)
+    return_dict['train_max'] = find_train_max(db, collections, return_dict['test_min'])
+    return_dict['test_max'] = find_test_max(db, collections)
+    return_dict['train_min'] = find_train_min(db, collections, history_length)
+    client.close()
+    return return_dict
 
-
-    test_min = find_test_min(db, collections)
-    train_max = find_train_max(db, collections, test_min,)
-    test_max = find_test_max(db, collections)
-    train_min = find_train_min(db, collections, history_length)
+def generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset, num_classes, test_min, train_max, test_max, train_min):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
+    client = MongoClient('127.0.0.1', 27017)
+    db = client['markets']
+    collections = db.collection_names()
+    collections.sort()
     test_batch_size = 100
 
     return_dict = {}
     return_dict['train_features'] = numpy.zeros((batch_size, ttl_length, markets_length))
     return_dict['test_features'] = numpy.zeros((test_batch_size, ttl_length, markets_length))
-    return_dict['train_labels'] = numpy.zeros((batch_size))
-    return_dict['test_labels'] = numpy.zeros((test_batch_size))
+    return_dict['train_labels'] = numpy.zeros(batch_size)
+    return_dict['test_labels'] = numpy.zeros(test_batch_size)
     for i in range(0, batch_size):
         train_epoch = np.random.uniform(low=train_min, high=train_max)
         return_dict['train_features'][i] = generate_feature(train_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
-        return_dict['train_labels'][i] = generate_label(db, collections, train_epoch, markets_length, label_offset)
+        return_dict['train_labels'][i] = generate_label(db, collections, train_epoch, label_offset, markets_length)
 #        print("generated batch index: %d" % i)
 
     for i in range(0, test_batch_size):
         test_epoch = np.random.uniform(low=test_min, high=test_max)
         return_dict['test_features'][i] = generate_feature(test_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
-        return_dict['test_labels'][i] = generate_label(db, collections, test_epoch, markets_length, label_offset)
+        return_dict['test_labels'][i] = generate_label(db, collections, test_epoch, label_offset, markets_length)
 #        print("generated test_batch index: %d" % i)
 #    print(return_dict['train_labels'])
 #    print(return_dict['test_labels'])
@@ -158,6 +164,7 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
         processes[i].start()
     """
     sess.run(init)
+    ranges = find_ranges(history_length)
     for batch in range(100):
         train_features = 0
         train_labels = 0
@@ -171,7 +178,7 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
         processes[last_process] = Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length,ttl_length, queues[last_process]))
         processes[last_process].start()
         """
-        data_dict = generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset)
+        data_dict = generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset, num_classes, ranges['test_min'], ranges['train_max'], ranges['test_max'], ranges['train_min'])
         train_features = data_dict['train_features']
         train_labels = data_dict['train_labels']
         test_features = data_dict['test_features']
@@ -186,7 +193,7 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
 
 
 
-train(trade_length=4, history_length=100, markets_length=85, batch_size=50, minibatch_size=10, epochs=2, learn_rate=.003, num_hidden_units=200, num_inputs=85, num_classes=86, label_offset=30000)
+train(trade_length=4, history_length=20, markets_length=85, batch_size=50, minibatch_size=10, epochs=3, learn_rate=.003, num_hidden_units=25, num_inputs=85, num_classes=86, label_offset=30000)
 
 """
 train rnn on input = (minibatch_size x 400 x 190)(save to disk after for retentional training?), 
