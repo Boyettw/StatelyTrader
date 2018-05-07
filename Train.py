@@ -199,7 +199,7 @@ for history_length in range(stop=200, step=5):
         for num_hidden_units in range(stop=200, step=5):
             for label_offset in range(start=30000, stop=600000, step = 10000):
 """
-train(trade_length=4, history_length=20, markets_length=85, batch_size=50, minibatch_size=10, epochs=5, learn_rate=.003, num_hidden_units=7, num_inputs=85, num_classes=86, label_offset=30000)
+train(trade_length=4, history_length=10, markets_length=85, batch_size=20000, minibatch_size=2000, epochs=15000, learn_rate=.003, num_hidden_units=7, num_inputs=85, num_classes=86, label_offset=30000)
 
 """
 train rnn on input = (minibatch_size x 400 x 190)(save to disk after for retentional training?), 
