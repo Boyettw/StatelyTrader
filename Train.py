@@ -165,7 +165,7 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
     """
     sess.run(init)
     ranges = find_ranges(history_length)
-    for batch in range(100):
+    for batch in range(1000):
         train_features = 0
         train_labels = 0
         test_features = 0
@@ -183,6 +183,8 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
         train_labels = data_dict['train_labels']
         test_features = data_dict['test_features']
         test_labels = data_dict['test_labels']
+        print(train_labels)
+        print(test_labels)
         for i in range(epochs):
             for j in range(int(train_features.shape[0] / minibatch_size)):
                 minibatch_features = train_features[j * minibatch_size:(j + 1) * minibatch_size]
@@ -190,10 +192,14 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
                 _, loss, acc = sess.run([optimizer, loss_calc, accuracy], feed_dict={x: minibatch_features, y: minibatch_labels})
             test_loss, test_acc = sess.run([loss_calc, accuracy], feed_dict={x: test_features, y: test_labels})
             print("Epoch %03d: train=%.3f test=%.3f" % (i, acc, test_acc))
-
-
-
-train(trade_length=4, history_length=20, markets_length=85, batch_size=50, minibatch_size=10, epochs=3, learn_rate=.003, num_hidden_units=25, num_inputs=85, num_classes=86, label_offset=30000)
+"""
+for history_length in range(stop=200, step=5):
+    for minibatch_size in range(stop=500, step=100):
+        batch_size = 5 * minibatch_size
+        for num_hidden_units in range(stop=200, step=5):
+            for label_offset in range(start=30000, stop=600000, step = 10000):
+"""
+train(trade_length=4, history_length=20, markets_length=85, batch_size=50, minibatch_size=10, epochs=5, learn_rate=.003, num_hidden_units=7, num_inputs=85, num_classes=86, label_offset=30000)
 
 """
 train rnn on input = (minibatch_size x 400 x 190)(save to disk after for retentional training?), 
