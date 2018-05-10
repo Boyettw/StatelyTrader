@@ -22,8 +22,7 @@ def evaluate_label(label_index, input_epoch, label_offset):
     gains = []
     for market_name in collections:
         markets.append(market_name)
-        for label_document in db[market_name].find({'epoch': {'$lte': future_epoch}}).sort(
-                [('epoch', pymongo.DESCENDING)]).limit(1):
+        for label_document in db[market_name].find({'epoch': {'$lte': future_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             future_trade_price = label_document['rate']
         for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             gains.append((future_trade_price - trade['rate']) / trade['rate'])
@@ -223,10 +222,25 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
                 _, loss, acc = sess.run([optimizer, loss_calc, accuracy], feed_dict={x: minibatch_features, y: minibatch_labels})
             test_loss, test_acc = sess.run([loss_calc, accuracy], feed_dict={x: test_features, y: test_labels})
             print("Epoch %03d: train=%.3f test=%.3f" % (i, acc, test_acc))
-            if test_acc > 0.25:
-                break
+            if test_acc >= 0.16:
+                percentiles = 0.0
+                gains = 1.0
+                for k in range(len(test_labels)):
+                    max_epoch = 0.0
+                    for l in range(markets_length):
+                        if test_features[k][(history_length - 1) * 4][l] > max_epoch:
+                            max_epoch = test_features[k][(history_length - 1) * 4][l]
+                    test_loss, test_acc, label = sess.run([loss_calc, accuracy, prediction], feed_dict={x: np.expand_dims(test_features[k], axis=0), y: np.expand_dims(test_labels[k], axis=0)})
+                    percentile, gain = evaluate_label(int(label), max_epoch, label_offset)
+                    # print(percentile)
+                    gains = gains + gains * gain
+                    print(gains)
+                    percentiles += percentile
+                print("percentile=%.3f, averageGain=%.3f" % (
+                (percentiles / float(len(test_labels))), gains - 1.0 / float(len(test_labels))))
+
         percentiles = 0.0
-        gains = 1
+        gains = 1.0
         for k in range(len(test_labels)):
             max_epoch = 0.0
             for l in range(markets_length):
@@ -235,9 +249,10 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
             test_loss, test_acc, label = sess.run([loss_calc, accuracy, prediction], feed_dict={x: np.expand_dims(test_features[k], axis=0), y: np.expand_dims(test_labels[k], axis=0)})
             percentile, gain = evaluate_label(int(label), max_epoch, label_offset)
             #print(percentile)
-            gains += gain
+            gains = gains + gains * gain
+            print(gains)
             percentiles += percentile
-        print("percentile=%.3f, averageGain=%.3f" % ((percentiles / float(len(test_labels))), gains / float(len(test_labels))))
+        print("percentile=%.3f, averageGain=%.3f" % ((percentiles / float(len(test_labels))), gains - 1.0 / float(len(test_labels))))
 
 """
 for history_length in range(stop=200, step=5):
@@ -246,7 +261,7 @@ for history_length in range(stop=200, step=5):
         for num_hidden_units in range(stop=200, step=5):
             for label_offset in range(start=30000, stop=600000, step = 10000):
 """
-train(trade_length=4, history_length=10, markets_length=72, batch_size=500, minibatch_size=50, epochs=100, learn_rate=.003, num_hidden_units=7, num_inputs=72, num_classes=83, label_offset=30000)
+train(trade_length=4, history_length=10, markets_length=72, batch_size=40000, minibatch_size=2000, epochs=300, learn_rate=.003, num_hidden_units=7, num_inputs=72, num_classes=83, label_offset=30000)
 
 """
 train rnn on input = (minibatch_size x 400 x 190)(save to disk after for retentional training?), 
