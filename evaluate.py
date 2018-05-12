@@ -26,45 +26,67 @@ def transaction():
 Reversed iterator over sorted dict allows you to remove trailing values and nlogn sorted insertion time, logn lookuptime, constant time trimming.
 
 """
-def evaluate_label(label_index, input_epoch, label_offset):
+#int(label), max_epoch, label_offset, last_label
+def evaluate_label(current_label, last_label, buy_epoch, sell_epoch):
     client = MongoClient('127.0.0.1', 27017)
     db = client['markets']
     collections = db.collection_names()
     collections.sort()
-
     market_index = 0
     future_trade_price = 0
-
-    future_epoch = input_epoch + label_offset
-    markets = []
     gains = []
     for market_name in collections:
-        markets.append(market_name)
-        for label_document in db[market_name].find({'epoch': {'$lte': future_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
-            future_trade_price = label_document['rate']
-        for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
-            gains.append((future_trade_price - trade['rate']) / trade['rate'])
+        if market_index == 72:
+            purchase_fee = 0.9975
+        elif market_index == last_label:
+            purchase_fee = 1
+        else:
+            purchase_fee = 0.9975*0.9975
+        if current_label != 72:
+            sell_fee = 0.9975
+        else:
+            sell_fee = 1
+
+        for label_document in db[market_name].find({'epoch': {'$lte': sell_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
+            future_trade_price = label_document['rate']*sell_fee
+        for trade in db[market_name].find({'epoch': {'$lte': buy_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
+            current_trade_price = trade['rate'] / purchase_fee
+        gains.append(1 + (future_trade_price - current_trade_price) / trade['rate'])
         market_index += 1
-    gains.append(0.0)
+
+    gains.append(1.0 * sell_fee)
     num_better = 0
     markets_length = market_index
     for i in range(len(gains)):
-        if gains[i] > gains[label_index]:
+        if gains[i] > gains[current_label]:
             num_better += 1
     client.close()
-    return (1 - (num_better / markets_length)), gains[label_index]
+    return (1 - (num_better / markets_length)), gains[current_label]
 
-def generate_label(db, collections, input_epoch, label_offset, num_classes):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
+def generate_label(db, collections, input_epoch, label_offset):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
     market_index = 0
     max_gain = 0
     future_trade_price = 0
     future_epoch = input_epoch + label_offset
-    max_market = num_classes
+    max_market = 72
+    """
+    if market_index == 72:
+        purchase_fee = 0.9975
+    elif market_index == last_label:
+        purchase_fee = 1
+    else:
+        purchase_fee = 0.9975 * 0.9975
+    if current_label != 72:
+        sell_fee = 0.9975
+    else:
+        sell_fee = 1
+    """
     for market_name in collections:
         for label_document in db[market_name].find({'epoch': {'$lte': future_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             future_trade_price = label_document['rate']
         for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
-            trade_gain = (future_trade_price - trade['rate']) / trade['rate']
+            current_trade_price = trade['rate'] / (0.9975*0.9975)
+            trade_gain = ((future_trade_price * (0.9975*0.9975)) - current_trade_price) / trade['rate']
             if trade_gain > max_gain:
                 max_gain = trade_gain
                 max_market = market_index
@@ -88,24 +110,35 @@ def generate_feature(input_epoch, db, collections, trade_length, history_length,
             val_index -= trade_length
         market_count += 1
     epoch_index = 0
-    #for market_index in range(0, markets_length):
-    #    history[epoch_index][market_index] -= input_min
+    for market_index in range(0, markets_length):
+        history[epoch_index][market_index] -= input_min
     epoch_index += 4
 
     return history
 
-def find_test_max(db, collections):
+#def find_dev_max():
+
+#def find_dev_min():
+
+
+
+def find_test_max(db, collections, offset):
     max_epoch = sys.float_info.max
+    temp_max_epoch = sys.float_info.max
     for market in collections:
-        for trade in db[market].find().sort([('epoch', pymongo.DESCENDING)]).limit(2):
+        for trade in db[market].find().sort([('epoch', pymongo.DESCENDING)]).limit(1):
+            if temp_max_epoch > trade['epoch']:
+                temp_max_epoch = trade['epoch']
+    for market in collections:
+        for trade in db[market].find({'epoch': {'$lte':temp_max_epoch - (offset + 1)}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             if max_epoch > trade['epoch']:
                 max_epoch = trade['epoch']
     return max_epoch
 
-def find_test_min(db, collections):
+def find_test_min(db, collections, test_max):
     min_epoch = sys.float_info.max
     for market in collections:
-        for trade in db[market].find().sort([('epoch', pymongo.DESCENDING)]).limit(3000):
+        for trade in db[market].find({'epoch': {'$lte': test_max}}).sort([('epoch', pymongo.DESCENDING)]).limit(1000):
             if min_epoch > trade['epoch']:
                 min_epoch = trade['epoch']
     return min_epoch
@@ -126,15 +159,15 @@ def find_train_min(db, collections, history_length):
                 min_epoch = trade['epoch']
     return min_epoch
 
-def find_ranges(history_length):
+def find_ranges(history_length, offset):
     client = MongoClient('127.0.0.1', 27017)
     db = client['markets']
     collections = db.collection_names()
     collections.sort()
     return_dict = {}
-    return_dict['test_min'] = find_test_min(db, collections)
-    return_dict['train_max'] = find_train_max(db, collections, return_dict['test_min'])
-    return_dict['test_max'] = find_test_max(db, collections)
+    return_dict['test_max'] = find_test_max(db, collections, offset)
+    return_dict['test_min'] = find_test_min(db, collections,return_dict['test_max'])
+    return_dict['train_max'] = find_train_max(db, collections, return_dict['test_min'] - (offset + 1))
     return_dict['train_min'] = find_train_min(db, collections, history_length)
     client.close()
     return return_dict
@@ -144,29 +177,39 @@ def generate_data(batch_size, trade_length, history_length, markets_length, ttl_
     db = client['markets']
     collections = db.collection_names()
     collections.sort()
-    test_batch_size = 300
+    test_slices = int(int((test_max - test_min) - 1) / int(label_offset))
 
     return_dict = {}
     return_dict['train_features'] = numpy.zeros((batch_size, ttl_length, markets_length))
-    return_dict['test_features'] = numpy.zeros((test_batch_size, ttl_length, markets_length))
+    return_dict['test_features'] = numpy.zeros((test_slices, ttl_length, markets_length))
     return_dict['train_labels'] = numpy.zeros(batch_size)
-    return_dict['test_labels'] = numpy.zeros(test_batch_size)
+    return_dict['test_labels'] = numpy.zeros(test_slices)
     for i in range(0, batch_size):
         train_epoch = np.random.uniform(low=train_min, high=train_max)
         return_dict['train_features'][i] = generate_feature(train_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
-        return_dict['train_labels'][i] = generate_label(db, collections, train_epoch, label_offset, markets_length)
+        return_dict['train_labels'][i] = generate_label(db, collections, train_epoch, label_offset)
 #        print("generated batch index: %d" % i)
 
-    for i in range(0, test_batch_size):
-        test_epoch = np.random.uniform(low=test_min, high=test_max)
+    print(test_slices)
+    for i in range(test_slices):
+        test_epoch = (test_min + i*label_offset)
         return_dict['test_features'][i] = generate_feature(test_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
-        return_dict['test_labels'][i] = generate_label(db, collections, test_epoch, label_offset, markets_length)
+        return_dict['test_labels'][i] = generate_label(db, collections, test_epoch, label_offset)
 #        print("generated test_batch index: %d" % i)
 #    print(return_dict['train_labels'])
 #    print(return_dict['test_labels'])
+    np.save('train_features', return_dict['train_features'])
+    np.save('test_features', return_dict['test_features'])
+    np.save('train_labels', return_dict['train_labels'])
+    np.save('test_labels', return_dict['test_labels'])
     client.close()
     return return_dict
 
+"""
+            for j in range(int(train_features.shape[0] / minibatch_size)):
+                minibatch_features = train_features[j * minibatch_size:(j + 1) * minibatch_size]
+                minibatch_labels = train_labels[j * minibatch_size:(j + 1) * minibatch_size]
+"""
 
 def train(trade_length, history_length, markets_length, batch_size, minibatch_size, epochs, learn_rate, num_hidden_units, num_inputs, num_classes, label_offset):
     ttl_length = history_length * trade_length
@@ -212,73 +255,69 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
         processes[i].start()
     """
     sess.run(init)
-    ranges = find_ranges(history_length)
-    for batch in range(1000):
-        train_features = 0
-        train_labels = 0
-        test_features = 0
-        test_labels = 0
-        """
-        last_process = (last_process + 1) % num_processes
-        data_dict = queues[last_process].get()
-        processes[last_process].join()
-        processes[last_process].terminate()
-        processes[last_process] = Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length,ttl_length, queues[last_process]))
-        processes[last_process].start()
-        """
-        data_dict = generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset, num_classes, ranges['test_min'], ranges['train_max'], ranges['test_max'], ranges['train_min'])
-        train_features = data_dict['train_features']
-        train_labels = data_dict['train_labels']
-        test_features = data_dict['test_features']
-        test_labels = data_dict['test_labels']
-        print(train_labels)
-        print(test_labels)
-        for i in range(epochs):
-            for j in range(int(train_features.shape[0] / minibatch_size)):
-                minibatch_features = train_features[j * minibatch_size:(j + 1) * minibatch_size]
-                minibatch_labels = train_labels[j * minibatch_size:(j + 1) * minibatch_size]
-                _, loss, acc = sess.run([optimizer, loss_calc, accuracy], feed_dict={x: minibatch_features, y: minibatch_labels})
-            test_loss, test_acc = sess.run([loss_calc, accuracy], feed_dict={x: test_features, y: test_labels})
-            print("Epoch %03d: train=%.3f test=%.3f" % (i, acc, test_acc))
-            if test_acc >= 0.15:
-                percentiles = 0.0
-                gains = 1.0
-                for k in range(len(test_labels)):
-                    max_epoch = 0.0
-                    for l in range(markets_length):
-                        if test_features[k][(history_length - 1) * 4][l] > max_epoch:
-                            max_epoch = test_features[k][(history_length - 1) * 4][l]
-                    test_loss, test_acc, label = sess.run([loss_calc, accuracy, prediction], feed_dict={x: np.expand_dims(test_features[k], axis=0), y: np.expand_dims(test_labels[k], axis=0)})
-                    percentile, gain = evaluate_label(int(label), max_epoch, label_offset)
-                    # print(percentile)
-                    gains = gains + gains * gain
-                    print(gains)
-                    percentiles += percentile
-                print("percentile=%.3f, averageGain=%.5f" % (
-                (percentiles / float(len(test_labels))), gains - 1.0 / float(len(test_labels))))
+    ranges = find_ranges(history_length, offset= label_offset)
+    train_features = 0
+    train_labels = 0
+    test_features = 0
+    test_labels = 0
+    """
+    last_process = (last_process + 1) % num_processes
+    data_dict = queues[last_process].get()
+    processes[last_process].join()
+    processes[last_process].terminate()
+    processes[last_process] = Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length,ttl_length, queues[last_process]))
+    processes[last_process].start()
+    """
+    data_dict = generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset, num_classes, ranges['test_min'], ranges['train_max'], ranges['test_max'], ranges['train_min'])
+    #data_dict = {'train_features':np.load("train_features.npy"), 'train_labels':np.load('train_labels.npy'), 'test_features':np.load('test_features.npy'), 'test_labels':np.load('test_labels.npy')}
+    train_features = data_dict['train_features']
+    train_labels = data_dict['train_labels']
+    test_features = data_dict['test_features']
+    test_labels = data_dict['test_labels']
 
-        percentiles = 0.0
-        gains = 1.0
-        last_label = 72
-        trade_count = 1
-        for k in range(len(test_labels)):
-            max_epoch = 0.0
-            for l in range(markets_length):
-                if test_features[k][(history_length - 1)*4][l] > max_epoch:
-                    max_epoch = test_features[k][(history_length - 1)*4][l]
-            test_loss, test_acc, label = sess.run([loss_calc, accuracy, prediction], feed_dict={x: np.expand_dims(test_features[k], axis=0), y: np.expand_dims(test_labels[k], axis=0)})
-            fee = 0.00025 if last_label != label else 0.0
-            percentile, gain = evaluate_label(int(label), max_epoch, label_offset)
-            #print(percentile)
-            gains = gains * (1.0 - fee)
-            gains = gains + gains * gain
+    print(train_labels)
+    print(test_labels)
+    for i in range(epochs):
+        for j in range(int(train_features.shape[0] / minibatch_size)):
+            minibatch_features = train_features[j * minibatch_size:(j + 1) * minibatch_size]
+            minibatch_labels = train_labels[j * minibatch_size:(j + 1) * minibatch_size]
+            _, loss, acc = sess.run([optimizer, loss_calc, accuracy], feed_dict={x: minibatch_features, y: minibatch_labels})
+        test_loss, test_acc = sess.run([loss_calc, accuracy], feed_dict={x: test_features, y: test_labels})
+        print("Epoch %03d: train=%.3f test=%.3f" % (i, acc, test_acc))
+
+    percentiles = 0.0
+    investment = 1.0
+    last_label = 72
+    trade_count = 1
+    avg_gain = 0.0
+    buy_epoch = sys.float_info.max
+    for k in range(len(test_labels)):
+        sell_epoch = sys.float_info.min
+        temp_buy_epoch = sys.float_info.max
+        for l in range(markets_length):
+            if test_features[k][(history_length - 1)*4][l] > sell_epoch:
+                sell_epoch = test_features[k][(history_length - 1)*4][l]
+            if  test_features[k][(history_length - 1)*4][l] < temp_buy_epoch:
+                temp_buy_epoch = test_features[k][(history_length - 1)*4][l]
+        test_loss, test_acc, label = sess.run([loss_calc, accuracy, prediction], feed_dict={x: np.expand_dims(test_features[k], axis=0), y: np.expand_dims(test_labels[k], axis=0)})
+        #print(logit)
+        #current_label, last_label, buy_epoch, sell_epoch
+        if label != last_label:
+            percentile, gain = evaluate_label(int(label), last_label, buy_epoch, sell_epoch)  #max_epoch, label_offset)
+            investment *= gain
+            avg_gain += gain
             trade_count += 1
-            last_label = label
-            print(gains)
-            percentiles += percentile
-            #is there a relationship between percentile performance on a "dev" section and total gain on a test? can we learn said relationship?
-        print("avgPercentile=%.3f, averageGain=%.5f" % ((percentiles / float(len(test_labels))), (gains - 1.0) / trade_count))
 
+            percentiles += percentile
+            print("percentile=%.3f, gain=%.3f, investment=%.3f, last_label=%s, label=%s" % (percentile, gain, investment, last_label, label))
+        else:
+            if temp_buy_epoch < buy_epoch:
+                buy_epoch = temp_buy_epoch
+        last_label = label
+        #print(percentile)
+        #print(investment)
+        #is there a relationship between percentile performance on a "dev" section and total gain on a test? can we learn said relationship?
+    print("avgPercentile=%.3f, totalGain=%.3f, avgGain=%.3f" % (percentiles / trade_count, investment, avg_gain/trade_count))
 """
 for history_length in range(stop=200, step=5):
     for minibatch_size in range(stop=500, step=100):
@@ -286,7 +325,7 @@ for history_length in range(stop=200, step=5):
         for num_hidden_units in range(stop=200, step=5):
             for label_offset in range(start=30000, stop=600000, step = 10000):
 """
-train(trade_length=4, history_length=10 , markets_length=72, batch_size=10000, minibatch_size=1000, epochs=300, learn_rate=.003, num_hidden_units=7, num_inputs=72, num_classes=73, label_offset=30000)
+train(trade_length=4, history_length=7, markets_length=72, batch_size=100000, minibatch_size=10000, epochs=5, learn_rate=.03, num_hidden_units=7, num_inputs=72, num_classes=73, label_offset=15000)
 
 """
 train rnn on input = (minibatch_size x 400 x 190)(save to disk after for retentional training?), 
