@@ -36,22 +36,22 @@ def evaluate_label(current_label, last_label, buy_epoch, sell_epoch):
     future_trade_price = 0
     gains = []
     for market_name in collections:
-        if market_index == 72:
-            purchase_fee = 0.9975
-        elif market_index == last_label:
+        if market_index == 72 or market_index == last_label:
             purchase_fee = 1
         else:
-            purchase_fee = 0.9975*0.9975
+            purchase_fee = .9975
+        for trade in db[market_name].find({'epoch': {'$lte': buy_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
+            current_trade_price = trade['rate'] / purchase_fee
+
         if current_label != 72:
             sell_fee = 0.9975
         else:
             sell_fee = 1
 
         for label_document in db[market_name].find({'epoch': {'$lte': sell_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
-            future_trade_price = label_document['rate']*sell_fee
-        for trade in db[market_name].find({'epoch': {'$lte': buy_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
-            current_trade_price = trade['rate'] / purchase_fee
-        gains.append(1 + (future_trade_price - current_trade_price) / trade['rate'])
+            future_trade_price = label_document['rate'] * sell_fee
+
+        gains.append(future_trade_price/current_trade_price)
         market_index += 1
 
     gains.append(1.0 * sell_fee)
@@ -65,7 +65,7 @@ def evaluate_label(current_label, last_label, buy_epoch, sell_epoch):
 
 def generate_label(db, collections, input_epoch, label_offset):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
     market_index = 0
-    max_gain = 0
+    max_gain = 0.0
     future_trade_price = 0
     future_epoch = input_epoch + label_offset
     max_market = 72
@@ -83,10 +83,10 @@ def generate_label(db, collections, input_epoch, label_offset):   #TODO reformat
     """
     for market_name in collections:
         for label_document in db[market_name].find({'epoch': {'$lte': future_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
-            future_trade_price = label_document['rate']
+            future_trade_price = label_document['rate'] * 0.9975
         for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
-            current_trade_price = trade['rate'] / (0.9975*0.9975)
-            trade_gain = ((future_trade_price * (0.9975*0.9975)) - current_trade_price) / trade['rate']
+            current_trade_price = trade['rate'] / 0.9975
+            trade_gain = future_trade_price / current_trade_price
             if trade_gain > max_gain:
                 max_gain = trade_gain
                 max_market = market_index
@@ -300,19 +300,21 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
             if  test_features[k][(history_length - 1)*4][l] < temp_buy_epoch:
                 temp_buy_epoch = test_features[k][(history_length - 1)*4][l]
         test_loss, test_acc, label = sess.run([loss_calc, accuracy, prediction], feed_dict={x: np.expand_dims(test_features[k], axis=0), y: np.expand_dims(test_labels[k], axis=0)})
+        label = np.random.randint(0, 73)
         #print(logit)
         #current_label, last_label, buy_epoch, sell_epoch
         if label != last_label:
             percentile, gain = evaluate_label(int(label), last_label, buy_epoch, sell_epoch)  #max_epoch, label_offset)
+            buy_epoch = sys.float_info.max
             investment *= gain
             avg_gain += gain
             trade_count += 1
-
             percentiles += percentile
             print("percentile=%.3f, gain=%.3f, investment=%.3f, last_label=%s, label=%s" % (percentile, gain, investment, last_label, label))
         else:
             if temp_buy_epoch < buy_epoch:
                 buy_epoch = temp_buy_epoch
+
         last_label = label
         #print(percentile)
         #print(investment)
@@ -325,7 +327,7 @@ for history_length in range(stop=200, step=5):
         for num_hidden_units in range(stop=200, step=5):
             for label_offset in range(start=30000, stop=600000, step = 10000):
 """
-train(trade_length=4, history_length=7, markets_length=72, batch_size=100000, minibatch_size=10000, epochs=5, learn_rate=.03, num_hidden_units=7, num_inputs=72, num_classes=73, label_offset=15000)
+train(trade_length=4, history_length=7, markets_length=72, batch_size=100000, minibatch_size=20000, epochs=5, learn_rate=.03, num_hidden_units=7, num_inputs=72, num_classes=73, label_offset=30000)
 
 """
 train rnn on input = (minibatch_size x 400 x 190)(save to disk after for retentional training?), 
