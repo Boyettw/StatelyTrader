@@ -11,11 +11,11 @@ def generate_label(db, collections, input_epoch, label_offset):   #TODO reformat
     max_gain = 0.0
     future_trade_price = 0
     future_epoch = input_epoch + label_offset
-    max_market = 72
+    max_market = 35
     fee = (0.9975*0.9975)
     for market_name in collections:
         for label_document in db[market_name].find({'epoch': {'$gte': future_epoch}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
-            future_trade_price = label_document['rate'] * 0.9975
+            future_trade_price = label_document['rate'] * fee
         for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             current_trade_price = trade['rate'] / fee
             trade_gain = future_trade_price / current_trade_price
@@ -32,16 +32,13 @@ def generate_feature(input_epoch, db, collections, trade_length, history_length,
     input_min = sys.float_info.max
     for market in collections:
         val_index = ttl_length
-        last_epoch = 0
         for val in db[market].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(history_length):
             if val['epoch'] < input_min:
                 input_min = val['epoch']
-
             history[val_index - 4][market_count] = val['epoch']
             history[val_index - 3][market_count] = val['orderType']
             history[val_index - 2][market_count] = val['rate']
             history[val_index - 1][market_count] = val['quantity']
-            last_epoch = val['epoch']
             val_index -= trade_length
         market_count += 1
     epoch_index = 0
@@ -67,7 +64,7 @@ def find_test_max(db, collections, offset):
 def find_test_min(db, collections, test_max):
     min_epoch = sys.float_info.max
     for market in collections:
-        for trade in db[market].find({'epoch': {'$lte': test_max}}).sort([('epoch', pymongo.DESCENDING)]).limit(100):
+        for trade in db[market].find({'epoch': {'$lte': test_max}}).sort([('epoch', pymongo.DESCENDING)]).limit(1000):
             if min_epoch > trade['epoch']:
                 min_epoch = trade['epoch']
     return min_epoch
@@ -101,11 +98,21 @@ def find_ranges(history_length, offset):
     client.close()
     return return_dict
 
-def validate_range(db, collections, input_epoch, label_offset):
-
-
+def validate_range(db, collections, input_epoch, history_length, label_offset):
+    for market in collections:
+        last_epoch = 0
+        for val in db[market].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(history_length):
+            if last_epoch != 0 and (val['epoch'] -  last_epoch) > 100000:
+                return False
+            last_epoch = val['epoch']
+        future_epoch = input_epoch + label_offset
+        for val in db[market].find({'epoch': {'$gte': future_epoch}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
+            if val['epoch'] > future_epoch + 120000:
+                return False
+    return True
 
 def generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset, num_classes, test_min, train_max, test_max, train_min):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
+    print("generating data")
     client = MongoClient('127.0.0.1', 27017)
     db = client['markets']
     collections = db.collection_names()
@@ -117,10 +124,16 @@ def generate_data(batch_size, trade_length, history_length, markets_length, ttl_
     return_dict['test_features'] = numpy.zeros((test_slices, ttl_length, markets_length))
     return_dict['train_labels'] = numpy.zeros(batch_size)
     return_dict['test_labels'] = numpy.zeros(test_slices)
+    return_dict['test_epochs'] = numpy.zeros(test_slices)
+    accept_count = 0.0
+    reject_count = 0.0
     for i in range(0, batch_size):
         train_epoch = np.random.uniform(low=train_min, high=train_max)
-        while not validate_range(db, collections, train_epoch):
+        while not validate_range(db, collections, train_epoch, history_length, label_offset):
+            reject_count += 1.0
             train_epoch = np.random.uniform(low=train_min, high=train_max)
+        accept_count += 1.0
+        print(accept_count/reject_count)
         return_dict['train_features'][i] = generate_feature(train_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
         return_dict['train_labels'][i] = generate_label(db, collections, train_epoch, label_offset)
 #        print("generated batch index: %d" % i)
@@ -128,6 +141,7 @@ def generate_data(batch_size, trade_length, history_length, markets_length, ttl_
     print(test_slices)
     for i in range(test_slices):
         test_epoch = (test_min + i * label_offset)
+        return_dict['test_epochs'][i] = test_epoch
         return_dict['test_features'][i] = generate_feature(test_epoch, db, collections,  trade_length, history_length, markets_length, ttl_length)
         return_dict['test_labels'][i] = generate_label(db, collections, test_epoch, label_offset)
 #        print("generated test_batch index: %d" % i)
@@ -138,20 +152,21 @@ def generate_data(batch_size, trade_length, history_length, markets_length, ttl_
     np.save(directory + str(label_offset) + '_' + str(history_length) + '_' + 'test_features', return_dict['test_features'])
     np.save(directory + str(label_offset) + '_' + str(history_length) + '_' + 'train_labels', return_dict['train_labels'])
     np.save(directory + str(label_offset) + '_' + str(history_length) + '_' + 'test_labels', return_dict['test_labels'])
+    np.save(directory + str(label_offset) + '_' + str(history_length) + '_' + 'test_epochs', return_dict['test_epochs'])
     client.close()
     print('Generated ' + str(label_offset) + '_' + str(history_length))
 
 #def generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset, num_classes, test_min, train_max, test_max, train_min):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
 
 processes = []
-
+print("started")
 if __name__ == '__main__':
-    for label_offset in range(10000,240000, 5000):
-        for history_length in range(1,30,5):
+    for label_offset in range(120000,12000000, 120000):
+        for history_length in range(5,30,5):
             ranges = find_ranges(history_length, offset=label_offset)
-            processes.append(Process(target=generate_data,args=(100000, 4, history_length, 72, history_length*4, label_offset, 73, ranges['test_min'], ranges['train_max'], ranges['test_max'], ranges['train_min'])))
-
-    num_processes = 6
+            processes.append(Process(target=generate_data,args=(100000, 4, history_length, 35, history_length*4, label_offset, 36, ranges['test_min'], ranges['train_max'], ranges['test_max'], ranges['train_min'])))
+    print("finished generating processes")
+    num_processes = 8
     index = 0
 
     for i in range(int(len(processes) / num_processes)):

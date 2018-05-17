@@ -38,14 +38,14 @@ def evaluate_label(current_label, last_label, buy_epoch, sell_epoch):
     future_trade_price = 0
     gains = []
     for market_name in collections:
-        if market_index == 72 or market_index == last_label:
+        if market_index == 35 or market_index == last_label:
             purchase_fee = 1
         else:
             purchase_fee = 0.9975 * 0.9975
         for trade in db[market_name].find({'epoch': {'$lte': buy_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             current_trade_price = trade['rate'] / purchase_fee
 
-        if current_label != 72:
+        if current_label != 35:
             sell_fee = 0.9975* 0.9975
         else:
             sell_fee = 1
@@ -70,15 +70,15 @@ def generate_label(db, collections, input_epoch, label_offset):   #TODO reformat
     max_gain = 0.0
     future_trade_price = 0
     future_epoch = input_epoch + label_offset
-    max_market = 72
+    max_market = 35
     """
-    if market_index == 72:
+    if market_index == 35:
         purchase_fee = 0.9975
     elif market_index == last_label:
         purchase_fee = 1
     else:
         purchase_fee = 0.9975 * 0.9975
-    if current_label != 72:
+    if current_label != 35:
         sell_fee = 0.9975
     else:
         sell_fee = 1
@@ -86,7 +86,7 @@ def generate_label(db, collections, input_epoch, label_offset):   #TODO reformat
     fee = (0.9975*0.9975)
     for market_name in collections:
         for label_document in db[market_name].find({'epoch': {'$lte': future_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
-            future_trade_price = label_document['rate'] * 0.9975
+            future_trade_price = label_document['rate'] * fee
         for trade in db[market_name].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(1):
             current_trade_price = trade['rate'] / fee
             trade_gain = future_trade_price / current_trade_price
@@ -135,7 +135,7 @@ def find_test_max(db, collections, offset):
 def find_test_min(db, collections, test_max):
     min_epoch = sys.float_info.max
     for market in collections:
-        for trade in db[market].find({'epoch': {'$lte': test_max}}).sort([('epoch', pymongo.DESCENDING)]).limit(50):
+        for trade in db[market].find({'epoch': {'$lte': test_max}}).sort([('epoch', pymongo.DESCENDING)]).limit(1000):
             if min_epoch > trade['epoch']:
                 min_epoch = trade['epoch']
     return min_epoch
@@ -168,6 +168,19 @@ def find_ranges(history_length, offset):
     return_dict['train_min'] = find_train_min(db, collections, history_length)
     client.close()
     return return_dict
+
+def validate_range(db, collections, input_epoch, history_length, label_offset):
+    for market in collections:
+        last_epoch = 0
+        for val in db[market].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(history_length):
+            if last_epoch != 0 and (val['epoch'] -  last_epoch) > 100000:
+                return False
+            last_epoch = val['epoch']
+        future_epoch = input_epoch + label_offset
+        for val in db[market].find({'epoch': {'$gte': future_epoch}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
+            if val['epoch'] > future_epoch + 120000:
+                return False
+    return True
 
 def generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset, num_classes, test_min, train_max, test_max, train_min):   #TODO call search functions and related spaghetti correctly, fix the OO if need be
     client = MongoClient('127.0.0.1', 27017)
@@ -270,12 +283,18 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
     processes[last_process] = Process(target=generate_data, args=(batch_size, trade_length, history_length, markets_length,ttl_length, queues[last_process]))
     processes[last_process].start()
     """
+    """
     #data_dict = generate_data(batch_size, trade_length, history_length, markets_length, ttl_length, label_offset, num_classes, ranges['test_min'], ranges['train_max'], ranges['test_max'], ranges['train_min'])
     data_dict = {'train_features':np.load("train_features.npy"), 'train_labels':np.load('train_labels.npy'), 'test_features':np.load('test_features.npy'), 'test_labels':np.load('test_labels.npy')}
     train_features = data_dict['train_features']
     train_labels = data_dict['train_labels']
     test_features = data_dict['test_features']
     test_labels = data_dict['test_labels']
+    """
+    train_features = np.load("E:\\120000_1_train_features.npy")
+    train_labels = np.load('E:\\120000_1_train_labels.npy')
+    test_features = np.load('E:\\120000_1_test_features.npy')
+    test_labels = np.load('E:\\120000_1_test_labels.npy')
 
     print(train_labels)
     print(test_labels)
@@ -289,7 +308,7 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
 
     percentiles = 0.0
     investment = 1.0
-    last_label = 72
+    last_label = 35
     trade_count = 0
     avg_gain = 0.0
     buy_epoch = sys.float_info.max
@@ -302,7 +321,7 @@ def train(trade_length, history_length, markets_length, batch_size, minibatch_si
             if  test_features[k][(history_length - 1)*4][l] < temp_buy_epoch:
                 temp_buy_epoch = test_features[k][(history_length - 1)*4][l]
         test_loss, test_acc, label = sess.run([loss_calc, accuracy, prediction], feed_dict={x: np.expand_dims(test_features[k], axis=0), y: np.expand_dims(test_labels[k], axis=0)})
-        #label = np.random.randint(0, 73)
+        #label = np.random.randint(0, 36)
         #print(logit)
         #current_label, last_label, buy_epoch, sell_epoch
         if label != last_label:
@@ -329,7 +348,7 @@ for history_length in range(stop=200, step=5):
         for num_hidden_units in range(stop=200, step=5):
             for label_offset in range(start=30000, stop=600000, step = 10000):
 """
-train(trade_length=4, history_length=6, markets_length=72, batch_size=10000, minibatch_size=1000, epochs=120, learn_rate=.3, num_hidden_units=10, num_inputs=72, num_classes=73, label_offset=60000)
+train(trade_length=4, history_length=1, markets_length=35, batch_size=100000, minibatch_size=1000, epochs=100, learn_rate=.005, num_hidden_units=20, num_inputs=35, num_classes=36, label_offset=120000)
 
 """
 train rnn on input = (minibatch_size x 400 x 190)(save to disk after for retentional training?), 
