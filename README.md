@@ -1,5 +1,7 @@
 # StatelyTrader
 Bittrex trading wallet AI, run on your own device for free!
+
+
 This system is comprised of a number of coupled parts, any downtime can result in fuzzy data (areas where noise(missing data in this case) disturbs the model's manifold)
 
 The Node server listens to bittrex.com and integrates with electron allowing users to trade programatically.
