@@ -8,7 +8,7 @@ import os
 
 def generate_label(db, collections, input_epoch, label_offset):   #TODO reformat to return the one label based on algorithmic search through each market, return the index in the sorted collection
     market_index = 0
-    max_gain = 0.0
+    max_gain = 0.9975
     future_trade_price = 0
     future_epoch = input_epoch + label_offset
     max_market = 35
@@ -64,7 +64,7 @@ def find_test_max(db, collections, offset):
 def find_test_min(db, collections, test_max):
     min_epoch = sys.float_info.max
     for market in collections:
-        for trade in db[market].find({'epoch': {'$lte': test_max}}).sort([('epoch', pymongo.DESCENDING)]).limit(1000):
+        for trade in db[market].find({'epoch': {'$lte': test_max}}).sort([('epoch', pymongo.DESCENDING)]).limit(30000):
             if min_epoch > trade['epoch']:
                 min_epoch = trade['epoch']
     return min_epoch
@@ -102,12 +102,12 @@ def validate_range(db, collections, input_epoch, history_length, label_offset):
     for market in collections:
         last_epoch = 0
         for val in db[market].find({'epoch': {'$lte': input_epoch}}).sort([('epoch', pymongo.DESCENDING)]).limit(history_length):
-            if last_epoch != 0 and (val['epoch'] -  last_epoch) > 100000:
+            if last_epoch != 0 and (val['epoch'] -  last_epoch) > 120000:
                 return False
             last_epoch = val['epoch']
         future_epoch = input_epoch + label_offset
         for val in db[market].find({'epoch': {'$gte': future_epoch}}).sort([('epoch', pymongo.ASCENDING)]).limit(1):
-            if val['epoch'] > future_epoch + 120000:
+            if val['epoch'] > future_epoch + 240000:
                 return False
     return True
 
@@ -125,8 +125,8 @@ def generate_data(batch_size, trade_length, history_length, markets_length, ttl_
     return_dict['train_labels'] = numpy.zeros(batch_size)
     return_dict['test_labels'] = numpy.zeros(test_slices)
     return_dict['test_epochs'] = numpy.zeros(test_slices)
-    accept_count = 0.0
-    reject_count = 0.0
+    accept_count = 1.0
+    reject_count = 1.0
     for i in range(0, batch_size):
         train_epoch = np.random.uniform(low=train_min, high=train_max)
         while not validate_range(db, collections, train_epoch, history_length, label_offset):
@@ -161,12 +161,12 @@ def generate_data(batch_size, trade_length, history_length, markets_length, ttl_
 processes = []
 print("started")
 if __name__ == '__main__':
-    for label_offset in range(120000,12000000, 120000):
-        for history_length in range(5,30,5):
+    for label_offset in [24120000, 12000000]:
+        for history_length in range(25, 100,1):
             ranges = find_ranges(history_length, offset=label_offset)
-            processes.append(Process(target=generate_data,args=(100000, 4, history_length, 35, history_length*4, label_offset, 36, ranges['test_min'], ranges['train_max'], ranges['test_max'], ranges['train_min'])))
+            processes.append(Process(target=generate_data,args=(50000, 4, history_length, 35, history_length*4, label_offset, 36, ranges['test_min'], ranges['train_max'], ranges['test_max'], ranges['train_min'])))
     print("finished generating processes")
-    num_processes = 8
+    num_processes = 6
     index = 0
 
     for i in range(int(len(processes) / num_processes)):
@@ -177,6 +177,7 @@ if __name__ == '__main__':
             processes[i * num_processes + j].terminate()
 
     for i in range(int(len(processes) % num_processes)):
-        processes[len(processes) - i].start()
+        processes[len(processes) - 1 - i].start()
     for i in range(int(len(processes) % num_processes)):
-        processes[len(processes) - i].join()
+        processes[len(processes) - 1 - i].join()
+        processes[len(processes) - 1 - i].terminate()
