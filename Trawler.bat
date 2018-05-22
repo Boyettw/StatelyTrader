@@ -1,3 +1,3 @@
 :start
-node C:\Users\Wes\Documents\trawler\trawler.js
+node trawler.js
 goto start

@@ -1,0 +1,14 @@
+{
+  "name": "????",
+  "version": "0.0.1",
+  "description": "",
+  "scripts": {},
+  "dependencies": {
+    "mongodb": "^3.0.8",
+    "node-bittrex-api": "^0.8.3",
+    "rxjs": "^6.1.0",
+    "websocket": "^1.0.26",
+    "ws": "^5.1.1"
+  },
+  "devDependencies": {}
+}
