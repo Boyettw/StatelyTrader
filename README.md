@@ -14,5 +14,4 @@ The Node server listens for contact from the python AI upon startup, then begins
 The AI loads up its tensor variables/states and begins predicting when enough data is loaded (history length)
 When predicted market changes the node server is notified of the new priorities.
 
-Should net between .985 and 1.25 x investment daily. Once complete actual statistics about gains will be updated here daily.
 
